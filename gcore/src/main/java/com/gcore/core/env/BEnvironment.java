@@ -54,7 +54,10 @@ public class BEnvironment {
     public static File getFakeLocationConf() {
         return new File(getSystemDir(), "fake-location.conf");
     }
-
+public static File getExternalUserDir(int userId) {
+    // Return external storage directory
+    return Environment.getExternalStorageDirectory();
+}
     // ========== FIXED: Add userId parameter to match Score ==========
     public static File getExternalUserDir(int userId) {
         // Return standard external storage for now
