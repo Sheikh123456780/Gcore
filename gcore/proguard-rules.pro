@@ -1,0 +1,14 @@
+-keep class android.** {*; }
+-keep class black.** {*; }
+-keep class com.android.** {*; }
+
+-keep class com.gcore.app.configuration.ClientConfiguration { *; }
+-keep class com.gcore.core.env.BEnvironment { *; }
+-keep class com.gcore.core.system.** { *; }
+-keep class com.gcore.core.NativeCore { *; }
+-keep class com.gcore.entity.pm.InstallResult {*; }
+-keep class com.gcore.fake.delegate.** {*; }
+-keep class com.gcore.fake.frameworks.** {*; }
+-keep class com.gcore.fake.service.** {*; }
+-keep class com.gcore.utils.FileUtils { *; }
+-keep class com.gcore.GreenBoxCore { *; }

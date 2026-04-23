@@ -1,0 +1,110 @@
+plugins {
+    id 'com.android.library'
+    id 'org.lsposed.lsparanoid'
+}
+
+android {
+    namespace 'com.gcore'
+    compileSdk 36
+
+    aidlPackagedList "android/app/IServiceConnection.aidl"
+    aidlPackagedList "android/accounts/IAccountManagerResponse.aidl"
+
+    defaultConfig {
+        minSdk 21
+        targetSdk 36
+        versionCode 1
+        versionName "1.0"
+        
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+        
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++17 -fvisibility=hidden -ffunction-sections -fdata-sections"
+                arguments "-DANDROID_STL=c++_static"  // CHANGED: shared -> static
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            
+            packagingOptions {
+                jniLibs {
+                    keepDebugSymbols = []
+                    useLegacyPackaging = true
+                }
+            }
+        }
+        
+        debug {
+            minifyEnabled false
+            debuggable true
+            jniDebuggable true
+            
+            packagingOptions {
+                jniLibs {
+                    keepDebugSymbols = ['**/*.so']
+                }
+            }
+        }
+    }
+    
+    externalNativeBuild {
+        cmake {
+            path file('./src/main/cpp/CMakeLists.txt')
+            version "3.22.1"
+        }
+    }
+    
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    
+    buildFeatures {
+        aidl true
+        buildConfig true
+    }
+    
+    aaptOptions {
+        cruncherEnabled = false
+        useNewCruncher = false
+    }
+    
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+    
+    lintOptions {
+        checkReleaseBuilds false
+        abortOnError false
+        warningsAsErrors false
+        disable "UnusedResources", 'RestrictedApi'
+        textOutput "stdout"
+        textReport false
+        check 'NewApi', 'InlinedApi'
+    }
+    
+    ndkVersion '29.0.14033849'
+}
+
+tasks.withType(Javadoc) {
+    options.addStringOption('Xdoclint:none', '-quiet')
+    options.addStringOption('encoding', 'UTF-8')
+    options.addStringOption('charSet', 'UTF-8')
+}
+
+dependencies {
+    implementation fileTree(dir: "libs", include: ["*.jar", "*.aar"])
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'com.android.tools.build:apksig:8.13.0'
+    implementation "com.github.CodingGay.BlackReflection:core:1.1.4"
+    annotationProcessor "com.github.CodingGay.BlackReflection:compiler:1.1.4"
+    
+    debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.14'
+}
