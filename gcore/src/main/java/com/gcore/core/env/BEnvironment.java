@@ -1,6 +1,7 @@
 package com.gcore.core.env;
 
 import android.os.Environment;
+import android.os.Process;
 
 import java.io.File;
 import java.util.Locale;
@@ -54,8 +55,16 @@ public class BEnvironment {
         return new File(getSystemDir(), "fake-location.conf");
     }
 
+    // ========== FIXED: Add userId parameter to match Score ==========
+    public static File getExternalUserDir(int userId) {
+        // Return standard external storage for now
+        // You can add userId-based isolation later
+        return Environment.getExternalStorageDirectory();
+    }
+
+    // Keep this for backward compatibility if needed
     public static File getExternalUserDir() {
-        return new File(Environment.getExternalStorageDirectory(), "sdcard");
+        return Environment.getExternalStorageDirectory();
     }
 
     public static File getExternalDataDir(String packageName) {
@@ -107,5 +116,9 @@ public class BEnvironment {
         FileUtils.mkdirs(file);
         return file;
     }
-
+    
+    // Add this for compatibility with IOCore's getProcDir(int)
+    public static File getProcDir() {
+        return new File(InternalDirectory, "proc");
+    }
 }
