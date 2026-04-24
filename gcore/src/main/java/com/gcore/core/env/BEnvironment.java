@@ -1,4 +1,3 @@
-
 package com.gcore.core.env;
 
 import android.os.Environment;
@@ -17,25 +16,37 @@ public class BEnvironment {
     // Make it non-final and initialize lazily
     private static File InternalDirectory = null;
 
-    private static File getInternalDirectory() {
+    private static synchronized File getInternalDirectory() {
         if (InternalDirectory == null) {
-            // Use files directory parent instead of cache directory parent
-            // This gives /data/data/package.name instead of /data/user/0/package.name
-            File filesDir = GreenBoxCore.getContext().getFilesDir();
-            if (filesDir != null) {
-                InternalDirectory = filesDir.getParentFile();
-            } else {
-                // Fallback
-                InternalDirectory = new File("/data/data/" + GreenBoxCore.getContext().getPackageName());
+            try {
+                // Use files directory parent instead of cache directory parent
+                // getFilesDir() returns: /data/data/com.pubgm/files
+                // getParent() returns: /data/data/com.pubgm (CORRECT)
+                File filesDir = GreenBoxCore.getContext().getFilesDir();
+                if (filesDir != null && filesDir.getParentFile() != null) {
+                    InternalDirectory = filesDir.getParentFile();
+                } else {
+                    // Fallback to app's data directory
+                    String packageName = GreenBoxCore.getContext().getPackageName();
+                    InternalDirectory = new File("/data/data/" + packageName);
+                }
+            } catch (Exception e) {
+                // Final fallback
+                InternalDirectory = new File("/data/data/com.pubgm");
             }
         }
         return InternalDirectory;
     }
 
-    // Allow external code to set the directory (called from GreenBoxCore)
+    // Allow setting custom directory (called from GreenBoxCore)
     public static void setInternalDirectory(File dir) {
-        InternalDirectory = dir;
-        load(); // Recreate directories
+        if (dir != null) {
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            InternalDirectory = dir;
+            load(); // Recreate directories
+        }
     }
 
     public static void load() {
