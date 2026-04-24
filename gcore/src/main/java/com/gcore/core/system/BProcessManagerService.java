@@ -332,3 +332,4 @@ public class BProcessManagerService implements ISystemService {
         FileUtils.deleteDir(BEnvironment.getProcDir());
     }
 }
+
