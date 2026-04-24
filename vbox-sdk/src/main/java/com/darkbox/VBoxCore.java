@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
 
 import black.android.app.BRActivityThread;
 import black.android.os.BRUserHandle;
@@ -79,8 +80,14 @@ public class VBoxCore extends ClientConfiguration {
     private final int mHostUserId = BRUserHandle.get().myUserId();
     private AppConfig appConfig;
     
-    // Intent cache for fast launch
-    private static final Map<String, Intent> sIntentCache = new ConcurrentHashMap<>();
+    // Enhanced Intent cache for fast launch
+    private static final ConcurrentHashMap<String, Intent> sIntentCache = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, ApplicationInfo> sAppInfoCache = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Boolean> sInstalledCache = new ConcurrentHashMap<>();
+    
+    // Launch queue for async processing
+    private static final LinkedBlockingQueue<Runnable> sLaunchQueue = new LinkedBlockingQueue<>();
+    private static volatile boolean sWarmupDone = false;
     
     // Pre-cached BGMI intent
     private static Intent sCachedBGMIIntent = null;
@@ -89,6 +96,70 @@ public class VBoxCore extends ClientConfiguration {
     private static boolean sHideRoot = true;
     private static boolean sHideXposed = true;
     private static boolean sEnableDaemonService = false;
+    
+    // Static initializer for preloader
+    static {
+        // Start preloader thread
+        Thread preloader = new Thread(() -> {
+            try {
+                Thread.sleep(300); // Wait for system ready
+                preloadCommonApps();
+            } catch (Exception e) {
+                Slog.e(TAG, "Preloader error", e);
+            }
+        }, "AppPreloader");
+        preloader.setDaemon(true);
+        preloader.start();
+        
+        // Start launch worker thread
+        Thread launchWorker = new Thread(() -> {
+            while (true) {
+                try {
+                    Runnable task = sLaunchQueue.take();
+                    task.run();
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        }, "LaunchWorker");
+        launchWorker.setDaemon(true);
+        launchWorker.start();
+    }
+    
+    private static void preloadCommonApps() {
+        try {
+            Slog.d(TAG, "Starting app preloader...");
+            String[] popularApps = {
+                "com.pubg.imobile",
+                "com.tencent.ig",
+                "com.dts.freefireth",
+                "com.garena.game.codm",
+                "com.activision.callofduty.shooter"
+            };
+            
+            for (String pkg : popularApps) {
+                try {
+                    Intent intent = getBPackageManager().getLaunchIntentForPackage(pkg, 0);
+                    if (intent != null) {
+                        sIntentCache.put(pkg + "_0", intent);
+                        Slog.d(TAG, "Preloaded: " + pkg);
+                    }
+                } catch (Exception e) {
+                    Slog.e(TAG, "Failed to preload: " + pkg, e);
+                }
+            }
+            
+            // Pre-cache BGMI specifically
+            if (sCachedBGMIIntent == null) {
+                sCachedBGMIIntent = sIntentCache.get("com.pubg.imobile_0");
+            }
+            
+            sWarmupDone = true;
+            Slog.d(TAG, "App preloader completed");
+        } catch (Exception e) {
+            Slog.e(TAG, "Preload error", e);
+        }
+    }
     
     public static VBoxCore get() {
         return sVBoxCore;
@@ -180,8 +251,9 @@ public class VBoxCore extends ClientConfiguration {
             BEnvironment.load();
         }
         
-        if (isServerProcess()) {
-            if (sEnableDaemonService) {
+        // Move heavy operations to background
+        new Thread(() -> {
+            if (isServerProcess() && sEnableDaemonService) {
                 Intent intent = new Intent();
                 intent.setClass(getContext(), DaemonService.class);
                 if (BuildCompat.isOreo_MR1()) {
@@ -190,7 +262,7 @@ public class VBoxCore extends ClientConfiguration {
                     getContext().startService(intent);
                 }
             }
-        }
+        }).start();
         
         // Async hook init
         new Thread(() -> {
@@ -209,25 +281,46 @@ public class VBoxCore extends ClientConfiguration {
         if (!isServerProcess()) {
             ServiceManager.initBlackManager();
         }
-        
-        // Pre-cache BGMI intent for fast launch
-        preCacheBGMIIntent();
     }
     
-    private void preCacheBGMIIntent() {
-        if (sCachedBGMIIntent != null) return;
+    // FAST LAUNCH METHOD - Use this for best performance
+    public void launchApkFast(String packageName) {
+        String cacheKey = packageName + "_0";
+        Intent launchIntent = sIntentCache.get(cacheKey);
         
-        new Thread(() -> {
-            try {
-                Thread.sleep(100);
-                sCachedBGMIIntent = getBPackageManager().getLaunchIntentForPackage("com.pubg.imobile", 0);
-                if (sCachedBGMIIntent != null) {
-                    Slog.d(TAG, "BGMI intent pre-cached successfully");
+        if (launchIntent != null) {
+            // Direct launch with cached intent
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            startActivity(launchIntent, 0);
+            Slog.d(TAG, "Fast launch: " + packageName);
+        } else {
+            // Queue for async loading
+            sLaunchQueue.offer(() -> {
+                Intent intent = getBPackageManager().getLaunchIntentForPackage(packageName, 0);
+                if (intent != null) {
+                    sIntentCache.put(cacheKey, intent);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent, 0);
+                    Slog.d(TAG, "Async launch: " + packageName);
+                } else {
+                    Slog.e(TAG, "Failed to get intent for: " + packageName);
                 }
-            } catch (Exception e) {
-                Slog.e(TAG, "Failed to pre-cache BGMI intent", e);
-            }
-        }).start();
+            });
+        }
+    }
+    
+    // Optimized BGMI launch
+    public void launchBGMIFast() {
+        if (sCachedBGMIIntent != null) {
+            Intent intent = new Intent(sCachedBGMIIntent);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            startActivity(intent, 0);
+            Slog.d(TAG, "BGMI fast launch");
+        } else {
+            launchApkFast("com.pubg.imobile");
+        }
     }
 
     public static Object mainThread() {
@@ -261,50 +354,63 @@ public class VBoxCore extends ClientConfiguration {
         return BStorageManager.get();
     }
 
+    // Original launch method (kept for compatibility)
     public void launchApk(String packageName) {
-        try {
-            // Use pre-cached intent for BGMI
-            Intent launchIntent = null;
-            if (packageName.equals("com.pubg.imobile") && sCachedBGMIIntent != null) {
-                launchIntent = sCachedBGMIIntent;
-            } else {
-                // Use cache map for other apps
-                String cacheKey = packageName + "_0";
-                launchIntent = sIntentCache.get(cacheKey);
-                if (launchIntent == null) {
-                    launchIntent = getBPackageManager().getLaunchIntentForPackage(packageName, 0);
-                    if (launchIntent != null) {
-                        sIntentCache.put(cacheKey, launchIntent);
-                    }
-                }
-            }
-            
-            if (launchIntent != null) {
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
-                startActivity(launchIntent, 0);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        launchApkFast(packageName); // Use fast version
     }
     
     public boolean isInstalled(String packageName, int userId) {
-        return getBPackageManager().isInstalled(packageName, userId);
+        String cacheKey = packageName + "_" + userId;
+        Boolean cached = sInstalledCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        boolean result = getBPackageManager().isInstalled(packageName, userId);
+        sInstalledCache.put(cacheKey, result);
+        return result;
+    }
+    
+    public ApplicationInfo getApplicationInfoFast(String packageName) {
+        ApplicationInfo cached = sAppInfoCache.get(packageName);
+        if (cached != null) {
+            return cached;
+        }
+        ApplicationInfo result = getApplicationInfo(packageName);
+        if (result != null) {
+            sAppInfoCache.put(packageName, result);
+        }
+        return result;
     }
 
     public void uninstallPackageAsUser(String packageName, int userId) {
         getBPackageManager().uninstallPackageAsUser(packageName, userId);
+        // Clear cache
+        sIntentCache.remove(packageName + "_0");
+        sInstalledCache.remove(packageName + "_" + userId);
+        sAppInfoCache.remove(packageName);
     }
 
     public void uninstallPackage(String packageName) {
         getBPackageManager().uninstallPackage(packageName);
+        // Clear cache
+        sIntentCache.remove(packageName + "_0");
+        sAppInfoCache.remove(packageName);
     }
 
     public InstallResult installPackageAsUser(String packageName, int userId) {
         try {
             PackageInfo packageInfo = getPackageManager().getPackageInfo(packageName, 0);
-            return getBPackageManager().installPackageAsUser(packageInfo.applicationInfo.sourceDir, InstallOption.installBySystem(), userId);
+            InstallResult result = getBPackageManager().installPackageAsUser(packageInfo.applicationInfo.sourceDir, InstallOption.installBySystem(), userId);
+            if (result.isSuccess()) {
+                // Pre-cache intent after installation
+                new Thread(() -> {
+                    Intent intent = getBPackageManager().getLaunchIntentForPackage(packageName, 0);
+                    if (intent != null) {
+                        sIntentCache.put(packageName + "_0", intent);
+                    }
+                }).start();
+            }
+            return result;
         } catch (PackageManager.NameNotFoundException e) {
             e.printStackTrace();
             return new InstallResult().installError(e.getMessage());
@@ -312,11 +418,32 @@ public class VBoxCore extends ClientConfiguration {
     }
 
     public InstallResult installPackageAsUser(File apk, int userId) {
-        return getBPackageManager().installPackageAsUser(apk.getAbsolutePath(), InstallOption.installByStorage(), userId);
+        InstallResult result = getBPackageManager().installPackageAsUser(apk.getAbsolutePath(), InstallOption.installByStorage(), userId);
+        if (result.isSuccess() && result.packageName != null) {
+            // Pre-cache intent after installation
+            final String pkgName = result.packageName;
+            new Thread(() -> {
+                Intent intent = getBPackageManager().getLaunchIntentForPackage(pkgName, 0);
+                if (intent != null) {
+                    sIntentCache.put(pkgName + "_0", intent);
+                }
+            }).start();
+        }
+        return result;
     }
 
     public InstallResult installPackageAsUser(Uri apk, int userId) {
-        return getBPackageManager().installPackageAsUser(apk.toString(), InstallOption.installByStorage().makeUriFile(), userId);
+        InstallResult result = getBPackageManager().installPackageAsUser(apk.toString(), InstallOption.installByStorage().makeUriFile(), userId);
+        if (result.isSuccess() && result.packageName != null) {
+            final String pkgName = result.packageName;
+            new Thread(() -> {
+                Intent intent = getBPackageManager().getLaunchIntentForPackage(pkgName, 0);
+                if (intent != null) {
+                    sIntentCache.put(pkgName + "_0", intent);
+                }
+            }).start();
+        }
+        return result;
     }
 
     public InstallResult installXPModule(File apk) {
@@ -516,5 +643,13 @@ public class VBoxCore extends ClientConfiguration {
 
     public boolean checkSelfPermission(String permission) {
         return getPackageManager().checkPermission(permission, getHostPackageName()) == 0;
+    }
+    
+    // Clear cache method
+    public void clearCache() {
+        sIntentCache.clear();
+        sAppInfoCache.clear();
+        sInstalledCache.clear();
+        Slog.d(TAG, "Cache cleared");
     }
 }
