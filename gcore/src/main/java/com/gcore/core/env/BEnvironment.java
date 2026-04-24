@@ -1,3 +1,4 @@
+
 package com.gcore.core.env;
 
 import android.os.Environment;
@@ -13,25 +14,48 @@ import org.lsposed.lsparanoid.Obfuscate;
 @Obfuscate
 public class BEnvironment {
 
-    private static final File InternalDirectory = new File(GreenBoxCore.getContext().getCacheDir().getParent());
+    // Make it non-final and initialize lazily
+    private static File InternalDirectory = null;
+
+    private static File getInternalDirectory() {
+        if (InternalDirectory == null) {
+            // Use files directory parent instead of cache directory parent
+            // This gives /data/data/package.name instead of /data/user/0/package.name
+            File filesDir = GreenBoxCore.getContext().getFilesDir();
+            if (filesDir != null) {
+                InternalDirectory = filesDir.getParentFile();
+            } else {
+                // Fallback
+                InternalDirectory = new File("/data/data/" + GreenBoxCore.getContext().getPackageName());
+            }
+        }
+        return InternalDirectory;
+    }
+
+    // Allow external code to set the directory (called from GreenBoxCore)
+    public static void setInternalDirectory(File dir) {
+        InternalDirectory = dir;
+        load(); // Recreate directories
+    }
 
     public static void load() {
-        FileUtils.mkdirs(InternalDirectory);
+        File dir = getInternalDirectory();
+        FileUtils.mkdirs(dir);
         FileUtils.mkdirs(getSystemDir());
         FileUtils.mkdirs(getCacheDir());
         FileUtils.mkdirs(getProcDir());
     }
 
     public static File getCacheDir() {
-        return new File(InternalDirectory, "cache");
+        return new File(getInternalDirectory(), "cache");
     }
 
     public static File getProcDir() {
-        return new File(InternalDirectory, "proc");
+        return new File(getInternalDirectory(), "proc");
     }
 
     public static File getSystemDir() {
-        return new File(InternalDirectory, "system");
+        return new File(getInternalDirectory(), "system");
     }
 
     public static File getUserInfoConf() {
@@ -67,15 +91,15 @@ public class BEnvironment {
     }
 
     public static File getAppDir(String packageName) {
-        return new File(InternalDirectory, String.format(Locale.getDefault(), "data/app/%s", packageName));
+        return new File(getInternalDirectory(), String.format(Locale.getDefault(), "data/app/%s", packageName));
     }
 
     public static File getDataDir(String packageName, int userId) {
-        return new File(InternalDirectory, String.format(Locale.getDefault(), "data/user/%d/%s", userId, packageName));
+        return new File(getInternalDirectory(), String.format(Locale.getDefault(), "data/user/%d/%s", userId, packageName));
     }
 
     public static File getDeDataDir(String packageName, int userId) {
-        return new File(InternalDirectory, String.format(Locale.getDefault(), "data/user_de/%d/%s", userId, packageName));
+        return new File(getInternalDirectory(), String.format(Locale.getDefault(), "data/user_de/%d/%s", userId, packageName));
     }
 
     public static File getFilesDir(String packageName, int userId) {
@@ -107,5 +131,4 @@ public class BEnvironment {
         FileUtils.mkdirs(file);
         return file;
     }
-
 }
