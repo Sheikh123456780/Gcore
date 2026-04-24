@@ -115,14 +115,20 @@ public class BPackage implements Parcelable {
         }
 
         this.requestedPermissions = aPackage.requestedPermissions;
+        
+        // FIXED: Handle signing details safely
         if (BuildCompat.isPie()) {
-            this.mSigningDetails = new SigningDetails(aPackage.mSigningDetails);
-            this.mSignatures = this.mSigningDetails.signatures;
+            if (aPackage.mSigningDetails != null) {
+                this.mSigningDetails = new SigningDetails(aPackage.mSigningDetails);
+                this.mSignatures = this.mSigningDetails.signatures;
+            } else {
+                this.mSignatures = aPackage.mSignatures;
+            }
         } else {
             this.mSignatures = aPackage.mSignatures;
         }
+        
         this.mAppMetaData = aPackage.mAppMetaData;
-        // this.mExtras = new BPackageSettings((PackageSetting) aPackage.mExtras);
         this.packageName = aPackage.packageName;
         this.mPreferredOrder = aPackage.mPreferredOrder;
         this.mSharedUserId = aPackage.mSharedUserId;
@@ -212,7 +218,6 @@ public class BPackage implements Parcelable {
         }
         this.mSignatures = in.createTypedArray(Signature.CREATOR);
         this.mAppMetaData = in.readBundle(Bundle.class.getClassLoader());
-        //this.mExtras = in.readParcelable(BPackageSettings.class.getClassLoader());
         this.packageName = in.readString();
         this.mPreferredOrder = in.readInt();
         this.mSharedUserId = in.readString();
@@ -426,6 +431,7 @@ public class BPackage implements Parcelable {
         }
     }
 
+    // FIXED: Complete fixed SigningDetails class without pastSigningCertificates
     public static final class SigningDetails implements Parcelable {
         public Signature[] signatures;
 
@@ -440,10 +446,11 @@ public class BPackage implements Parcelable {
         }
 
         public SigningDetails(PackageParser.SigningDetails signingDetails) {
-            if (signingDetails.pastSigningCertificates == null) {
+            // FIXED: Remove reference to pastSigningCertificates which doesn't exist on newer Android
+            if (signingDetails != null) {
                 this.signatures = signingDetails.signatures;
             } else {
-                this.signatures = signingDetails.pastSigningCertificates;
+                this.signatures = null;
             }
         }
 
@@ -699,7 +706,6 @@ public class BPackage implements Parcelable {
         }
         dest.writeTypedArray(this.mSignatures, flags);
         dest.writeBundle(this.mAppMetaData);
-        //dest.writeParcelable(this.mExtras, flags);
         dest.writeString(this.packageName);
         dest.writeInt(this.mPreferredOrder);
         dest.writeString(this.mSharedUserId);
@@ -726,4 +732,4 @@ public class BPackage implements Parcelable {
             return new BPackage[size];
         }
     };
-}
+        }
