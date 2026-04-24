@@ -21,7 +21,6 @@ import com.gcore.core.system.BProcessManagerService;
 import com.gcore.core.system.user.BUserHandle;
 import com.gcore.entity.pm.InstallOption;
 import com.gcore.utils.FileUtils;
-import com.gcore.utils.compat.BuildCompat;
 import com.gcore.utils.compat.PackageParserCompat;
 
 class Settings {
@@ -39,24 +38,13 @@ class Settings {
     }
 
     BPackageSettings getPackageLPw(String name, PackageParser.Package aPackage, InstallOption installOption) {
-        // FIXED: Ensure package is properly parsed
-        if (aPackage == null) {
-            throw new RuntimeException("Package is null for: " + name);
-        }
-        
         BPackageSettings pkgSettings;
         BPackageSettings origSettings = new BPackageSettings();
         origSettings.pkg = new BPackage(aPackage);
         origSettings.pkg.installOption = installOption;
         origSettings.installOption = installOption;
         origSettings.pkg.mExtras = origSettings;
-        
-        try {
-            origSettings.pkg.applicationInfo = PackageManagerCompat.generateApplicationInfo(origSettings.pkg, 0, BPackageUserState.create(), 0);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        
+        origSettings.pkg.applicationInfo = PackageManagerCompat.generateApplicationInfo(origSettings.pkg, 0, BPackageUserState.create(), 0);
         synchronized (mPackages) {
             pkgSettings = mPackages.get(name);
             if (pkgSettings != null) {
@@ -138,21 +126,17 @@ class Settings {
         Parcel parcel = Parcel.obtain();
         try {
             byte[] uidBytes = FileUtils.toByteArray(BEnvironment.getUidConf());
-            if (uidBytes != null && uidBytes.length > 0) {
-                parcel.unmarshall(uidBytes, 0, uidBytes.length);
-                parcel.setDataPosition(0);
+            parcel.unmarshall(uidBytes, 0, uidBytes.length);
+            parcel.setDataPosition(0);
 
-                mCurrUid = parcel.readInt();
-                HashMap hashMap = parcel.readHashMap(HashMap.class.getClassLoader());
-                synchronized (mAppIds) {
-                    mAppIds.clear();
-                    if (hashMap != null) {
-                        mAppIds.putAll(hashMap);
-                    }
-                }
+            mCurrUid = parcel.readInt();
+            HashMap hashMap = parcel.readHashMap(HashMap.class.getClassLoader());
+            synchronized (mAppIds) {
+                mAppIds.clear();
+                mAppIds.putAll(hashMap);
             }
         } catch (Exception e) {
-            // ignore
+            //e.printStackTrace();
         } finally {
             parcel.recycle();
         }
@@ -163,13 +147,11 @@ class Settings {
             File appRootDir = BEnvironment.getAppRootDir();
             FileUtils.mkdirs(appRootDir);
             File[] apps = appRootDir.listFiles();
-            if (apps != null) {
-                for (File app : apps) {
-                    if (!app.isDirectory()) {
-                        continue;
-                    }
-                    scanPackage(app.getName());
+            for (File app : apps) {
+                if (!app.isDirectory()) {
+                    continue;
                 }
+                scanPackage(app.getName());
             }
         }
     }
@@ -186,33 +168,22 @@ class Settings {
         File packageConf = BEnvironment.getPackageConf(packageName);
         try {
             byte[] bPackageSettingsBytes = FileUtils.toByteArray(packageConf);
-            if (bPackageSettingsBytes == null || bPackageSettingsBytes.length == 0) {
-                return;
-            }
-            
+
             packageSettingsIn.unmarshall(bPackageSettingsBytes, 0, bPackageSettingsBytes.length);
             packageSettingsIn.setDataPosition(0);
 
             BPackageSettings bPackageSettings = new BPackageSettings(packageSettingsIn);
             bPackageSettings.pkg.mExtras = bPackageSettings;
             if (bPackageSettings.installOption.isFlag(InstallOption.FLAG_SYSTEM)) {
-                try {
-                    PackageInfo packageInfo = GreenBoxCore.getPackageManager().getPackageInfo(packageName, PackageManager.GET_META_DATA);
-                    String currPackageSourcePath = packageInfo.applicationInfo.sourceDir;
-                    if (!currPackageSourcePath.equals(bPackageSettings.pkg.baseCodePath)) {
-                        BProcessManagerService.get().killAllByPackageName(bPackageSettings.pkg.packageName);
-                        BPackageSettings newPkg = reInstallBySystem(packageInfo, bPackageSettings.installOption);
-                        bPackageSettings.pkg = newPkg.pkg;
-                    }
-                } catch (PackageManager.NameNotFoundException e) {
-                    // Package not found in system, continue with existing
+                PackageInfo packageInfo = GreenBoxCore.getPackageManager().getPackageInfo(packageName, PackageManager.GET_META_DATA);
+                String currPackageSourcePath = packageInfo.applicationInfo.sourceDir;
+                if (!currPackageSourcePath.equals(bPackageSettings.pkg.baseCodePath)) {
+                    BProcessManagerService.get().killAllByPackageName(bPackageSettings.pkg.packageName);
+                    BPackageSettings newPkg = reInstallBySystem(packageInfo, bPackageSettings.installOption);
+                    bPackageSettings.pkg = newPkg.pkg;
                 }
             } else {
-                try {
-                    bPackageSettings.pkg.applicationInfo = PackageManagerCompat.generateApplicationInfo(bPackageSettings.pkg, 0, BPackageUserState.create(), 0);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
+                bPackageSettings.pkg.applicationInfo = PackageManagerCompat.generateApplicationInfo(bPackageSettings.pkg, 0, BPackageUserState.create(), 0);
             }
             bPackageSettings.save();
             mPackages.put(bPackageSettings.pkg.packageName, bPackageSettings);
@@ -232,11 +203,7 @@ class Settings {
         if (aPackage == null) {
             throw new RuntimeException("parser apk error.");
         }
-        try {
-            aPackage.applicationInfo = GreenBoxCore.getPackageManager().getPackageInfo(aPackage.packageName, 0).applicationInfo;
-        } catch (PackageManager.NameNotFoundException e) {
-            // Continue with existing
-        }
+        aPackage.applicationInfo = GreenBoxCore.getPackageManager().getPackageInfo(aPackage.packageName, 0).applicationInfo;
         return getPackageLPw(aPackage.packageName, aPackage, option);
     }
 
@@ -248,12 +215,7 @@ class Settings {
         try {
             PackageParser parser = PackageParserCompat.createParser(new File(file));
             PackageParser.Package aPackage = PackageParserCompat.parsePackage(parser, new File(file), 0);
-            try {
-                PackageParserCompat.collectCertificates(parser, aPackage, 0);
-            } catch (Throwable t) {
-                // Certificate collection may fail, continue anyway
-                t.printStackTrace();
-            }
+            PackageParserCompat.collectCertificates(parser, aPackage, 0);
             return aPackage;
         } catch (Throwable t) {
             t.printStackTrace();
@@ -261,3 +223,4 @@ class Settings {
         return null;
     }
 }
+
