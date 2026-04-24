@@ -368,3 +368,4 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
         mBroadcastManager.startup();
     }
 }
+
