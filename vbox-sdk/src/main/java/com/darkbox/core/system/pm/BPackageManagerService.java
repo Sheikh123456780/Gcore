@@ -137,7 +137,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     }
     
     // Add missing querySyncSetting method if needed
-    @Override
+  //  @Override
     public Bundle querySyncSetting(String authority, int userId) throws RemoteException {
         Bundle result = new Bundle();
         result.putBoolean("syncable", true);
