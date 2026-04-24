@@ -52,7 +52,6 @@ public class BPackage implements Parcelable {
 
     public InstallOption installOption;
 
-    // FIXED: Complete constructor with safe field access
     public BPackage(PackageParser.Package aPackage) {
         this.activities = new ArrayList<>(aPackage.activities.size());
         for (PackageParser.Activity activity : aPackage.activities) {
@@ -116,24 +115,14 @@ public class BPackage implements Parcelable {
         }
 
         this.requestedPermissions = aPackage.requestedPermissions;
-        
-        // FIXED: Handle signing details safely for all Android versions
         if (BuildCompat.isPie()) {
-            if (aPackage.mSigningDetails != null) {
-                this.mSigningDetails = new SigningDetails(aPackage.mSigningDetails);
-                if (this.mSigningDetails.signatures != null) {
-                    this.mSignatures = this.mSigningDetails.signatures;
-                } else {
-                    this.mSignatures = aPackage.mSignatures;
-                }
-            } else {
-                this.mSignatures = aPackage.mSignatures;
-            }
+            this.mSigningDetails = new SigningDetails(aPackage.mSigningDetails);
+            this.mSignatures = this.mSigningDetails.signatures;
         } else {
             this.mSignatures = aPackage.mSignatures;
         }
-        
         this.mAppMetaData = aPackage.mAppMetaData;
+        // this.mExtras = new BPackageSettings((PackageSetting) aPackage.mExtras);
         this.packageName = aPackage.packageName;
         this.mPreferredOrder = aPackage.mPreferredOrder;
         this.mSharedUserId = aPackage.mSharedUserId;
@@ -142,45 +131,10 @@ public class BPackage implements Parcelable {
         this.mVersionCode = aPackage.mVersionCode;
         this.applicationInfo = aPackage.applicationInfo;
         this.mVersionName = aPackage.mVersionName;
-        
-        // FIXED: Safe access for fields that may not exist on newer Android
-        try {
-            java.lang.reflect.Field field = PackageParser.Package.class.getDeclaredField("baseCodePath");
-            field.setAccessible(true);
-            this.baseCodePath = (String) field.get(aPackage);
-        } catch (Exception e) {
-            this.baseCodePath = null;
-        }
-        
-        try {
-            java.lang.reflect.Field field = PackageParser.Package.class.getDeclaredField("mSharedUserLabel");
-            field.setAccessible(true);
-            this.mSharedUserLabel = (int) field.get(aPackage);
-        } catch (Exception e) {
-            this.mSharedUserLabel = 0;
-        }
-        
-        try {
-            java.lang.reflect.Field field = PackageParser.Package.class.getDeclaredField("configPreferences");
-            field.setAccessible(true);
-            this.configPreferences = (ArrayList<ConfigurationInfo>) field.get(aPackage);
-            if (this.configPreferences == null) {
-                this.configPreferences = new ArrayList<>();
-            }
-        } catch (Exception e) {
-            this.configPreferences = new ArrayList<>();
-        }
-        
-        try {
-            java.lang.reflect.Field field = PackageParser.Package.class.getDeclaredField("reqFeatures");
-            field.setAccessible(true);
-            this.reqFeatures = (ArrayList<FeatureInfo>) field.get(aPackage);
-            if (this.reqFeatures == null) {
-                this.reqFeatures = new ArrayList<>();
-            }
-        } catch (Exception e) {
-            this.reqFeatures = new ArrayList<>();
-        }
+        this.baseCodePath = aPackage.baseCodePath;
+        this.mSharedUserLabel = aPackage.mSharedUserLabel;
+        this.configPreferences = aPackage.configPreferences;
+        this.reqFeatures = aPackage.reqFeatures;
     }
 
     protected BPackage(Parcel in) {
@@ -254,14 +208,11 @@ public class BPackage implements Parcelable {
 
         in.readStringList(this.requestedPermissions);
         if (BuildCompat.isPie()) {
-            try {
-                this.mSigningDetails = in.readParcelable(SigningDetails.class.getClassLoader());
-            } catch (Exception e) {
-                this.mSigningDetails = null;
-            }
+            this.mSigningDetails = in.readParcelable(SigningDetails.class.getClassLoader());
         }
         this.mSignatures = in.createTypedArray(Signature.CREATOR);
         this.mAppMetaData = in.readBundle(Bundle.class.getClassLoader());
+        //this.mExtras = in.readParcelable(BPackageSettings.class.getClassLoader());
         this.packageName = in.readString();
         this.mPreferredOrder = in.readInt();
         this.mSharedUserId = in.readString();
@@ -475,7 +426,6 @@ public class BPackage implements Parcelable {
         }
     }
 
-    // FIXED: Complete fixed SigningDetails class without pastSigningCertificates
     public static final class SigningDetails implements Parcelable {
         public Signature[] signatures;
 
@@ -490,16 +440,10 @@ public class BPackage implements Parcelable {
         }
 
         public SigningDetails(PackageParser.SigningDetails signingDetails) {
-            if (signingDetails != null) {
-                try {
-                    java.lang.reflect.Field field = PackageParser.SigningDetails.class.getDeclaredField("signatures");
-                    field.setAccessible(true);
-                    this.signatures = (Signature[]) field.get(signingDetails);
-                } catch (Exception e) {
-                    this.signatures = null;
-                }
+            if (signingDetails.pastSigningCertificates == null) {
+                this.signatures = signingDetails.signatures;
             } else {
-                this.signatures = null;
+                this.signatures = signingDetails.pastSigningCertificates;
             }
         }
 
@@ -755,6 +699,7 @@ public class BPackage implements Parcelable {
         }
         dest.writeTypedArray(this.mSignatures, flags);
         dest.writeBundle(this.mAppMetaData);
+        //dest.writeParcelable(this.mExtras, flags);
         dest.writeString(this.packageName);
         dest.writeInt(this.mPreferredOrder);
         dest.writeString(this.mSharedUserId);
@@ -781,4 +726,5 @@ public class BPackage implements Parcelable {
             return new BPackage[size];
         }
     };
-            }
+}
+
