@@ -18,9 +18,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Process;
-import java.lang.reflect.Method;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -118,37 +116,24 @@ public class GreenBoxCore extends ClientConfiguration {
     }
 
     public void doAttachBaseContext(Context context, ClientConfiguration clientConfiguration) {
-    if (clientConfiguration == null) {
-        throw new IllegalArgumentException("ClientConfiguration is null!");
-    }
-    Reflection.unseal(context);
-    sContext = context;
-    
-    // ========== ADD THIS FIX ==========
-    // Fix BEnvironment directory to point to app's data directory
-    try {
-        File correctDir = new File(sContext.getFilesDir().getParent());
-        // Use reflection to set the InternalDirectory
-        java.lang.reflect.Field field = BEnvironment.class.getDeclaredField("InternalDirectory");
-        field.setAccessible(true);
-        // Remove final modifier
-        java.lang.reflect.Field modifiersField = java.lang.reflect.Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(field, field.getModifiers() & ~java.lang.reflect.Modifier.FINAL);
-        field.set(null, correctDir);
-        // Also call setInternalDirectory if available
+        if (clientConfiguration == null) {
+            throw new IllegalArgumentException("ClientConfiguration is null!");
+        }
+        Reflection.unseal(context);
+        sContext = context;
+        
+        // ========== FIX BEnvironment DIRECTORY ==========
+        // This ensures GreenBox uses the correct app data directory
         try {
-            Method setMethod = BEnvironment.class.getDeclaredMethod("setInternalDirectory", File.class);
-            setMethod.invoke(null, correctDir);
-        } catch (Exception e) {}
-    } catch (Exception e) {
-        e.printStackTrace();
-    }
-    // ========== END FIX ==========
-    
-    mClientConfiguration = clientConfiguration;
-    initNotificationManager();
-    
+            File correctDir = new File(sContext.getApplicationInfo().dataDir);
+            BEnvironment.setInternalDirectory(correctDir);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        // ========== END FIX ==========
+        
+        mClientConfiguration = clientConfiguration;
+        initNotificationManager();
 
         String processName = getProcessName(getContext());
         if (processName.equals(GreenBoxCore.getHostPkg())) {
