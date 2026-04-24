@@ -1,6 +1,0 @@
-// JobRecord.aidl
-package com.darkbox.entity;
-
-// Declare any non-default types here with import statements
-
-parcelable JobRecord;
