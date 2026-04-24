@@ -121,17 +121,6 @@ public class GreenBoxCore extends ClientConfiguration {
         }
         Reflection.unseal(context);
         sContext = context;
-        
-        // ========== FIX BEnvironment DIRECTORY ==========
-        // This ensures GreenBox uses the correct app data directory
-        try {
-            File correctDir = new File(sContext.getApplicationInfo().dataDir);
-            BEnvironment.setInternalDirectory(correctDir);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        // ========== END FIX ==========
-        
         mClientConfiguration = clientConfiguration;
         initNotificationManager();
 
@@ -384,3 +373,4 @@ public class GreenBoxCore extends ClientConfiguration {
         }
     }
 }
+
