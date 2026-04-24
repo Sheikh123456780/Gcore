@@ -18,7 +18,9 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Process;
-
+import java.lang.reflect.Method;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
