@@ -21,6 +21,7 @@ import com.gcore.core.system.BProcessManagerService;
 import com.gcore.core.system.user.BUserHandle;
 import com.gcore.entity.pm.InstallOption;
 import com.gcore.utils.FileUtils;
+import com.gcore.utils.compat.BuildCompat;
 import com.gcore.utils.compat.PackageParserCompat;
 
 class Settings {
@@ -37,7 +38,26 @@ class Settings {
         }
     }
 
+    // FIXED: Added null check for signing details
     BPackageSettings getPackageLPw(String name, PackageParser.Package aPackage, InstallOption installOption) {
+        // FIXED: Ensure mSigningDetails is not null to avoid NoSuchFieldError
+        if (BuildCompat.isPie() && aPackage.mSigningDetails == null) {
+            try {
+                // Try to set an empty signing details using reflection
+                java.lang.reflect.Field field = PackageParser.Package.class.getDeclaredField("mSigningDetails");
+                field.setAccessible(true);
+                // Create empty signing details - use the class loader
+                Class<?> signingDetailsClass = Class.forName("android.content.pm.PackageParser$SigningDetails");
+                java.lang.reflect.Constructor<?> cons = signingDetailsClass.getDeclaredConstructor();
+                cons.setAccessible(true);
+                Object emptyDetails = cons.newInstance();
+                field.set(aPackage, emptyDetails);
+            } catch (Exception e) {
+                // Ignore - just continue with null
+                e.printStackTrace();
+            }
+        }
+        
         BPackageSettings pkgSettings;
         BPackageSettings origSettings = new BPackageSettings();
         origSettings.pkg = new BPackage(aPackage);
@@ -147,11 +167,13 @@ class Settings {
             File appRootDir = BEnvironment.getAppRootDir();
             FileUtils.mkdirs(appRootDir);
             File[] apps = appRootDir.listFiles();
-            for (File app : apps) {
-                if (!app.isDirectory()) {
-                    continue;
+            if (apps != null) {
+                for (File app : apps) {
+                    if (!app.isDirectory()) {
+                        continue;
+                    }
+                    scanPackage(app.getName());
                 }
-                scanPackage(app.getName());
             }
         }
     }
