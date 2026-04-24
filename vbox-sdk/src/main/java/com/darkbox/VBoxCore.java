@@ -398,28 +398,10 @@ public class VBoxCore extends ClientConfiguration {
     }
 
     public InstallResult installPackageAsUser(String packageName, int userId) {
-        try {
-            PackageInfo packageInfo = getPackageManager().getPackageInfo(packageName, 0);
-            InstallResult result = getBPackageManager().installPackageAsUser(packageInfo.applicationInfo.sourceDir, InstallOption.installBySystem(), userId);
-            if (result.isSuccess()) {
-                // Pre-cache intent after installation
-                new Thread(() -> {
-                    Intent intent = getBPackageManager().getLaunchIntentForPackage(packageName, 0);
-                    if (intent != null) {
-                        sIntentCache.put(packageName + "_0", intent);
-                    }
-                }).start();
-            }
-            return result;
-        } catch (PackageManager.NameNotFoundException e) {
-            e.printStackTrace();
-            return new InstallResult().installError(e.getMessage());
-        }
-    }
-
-    public InstallResult installPackageAsUser(File apk, int userId) {
-        InstallResult result = getBPackageManager().installPackageAsUser(apk.getAbsolutePath(), InstallOption.installByStorage(), userId);
-        if (result.isSuccess() && result.packageName != null) {
+    try {
+        PackageInfo packageInfo = getPackageManager().getPackageInfo(packageName, 0);
+        InstallResult result = getBPackageManager().installPackageAsUser(packageInfo.applicationInfo.sourceDir, InstallOption.installBySystem(), userId);
+        if (result.success && result.packageName != null) {
             // Pre-cache intent after installation
             final String pkgName = result.packageName;
             new Thread(() -> {
@@ -430,21 +412,40 @@ public class VBoxCore extends ClientConfiguration {
             }).start();
         }
         return result;
+    } catch (PackageManager.NameNotFoundException e) {
+        e.printStackTrace();
+        return new InstallResult().installError(e.getMessage());
     }
+}
 
-    public InstallResult installPackageAsUser(Uri apk, int userId) {
-        InstallResult result = getBPackageManager().installPackageAsUser(apk.toString(), InstallOption.installByStorage().makeUriFile(), userId);
-        if (result.isSuccess() && result.packageName != null) {
-            final String pkgName = result.packageName;
-            new Thread(() -> {
-                Intent intent = getBPackageManager().getLaunchIntentForPackage(pkgName, 0);
-                if (intent != null) {
-                    sIntentCache.put(pkgName + "_0", intent);
-                }
-            }).start();
-        }
-        return result;
+public InstallResult installPackageAsUser(File apk, int userId) {
+    InstallResult result = getBPackageManager().installPackageAsUser(apk.getAbsolutePath(), InstallOption.installByStorage(), userId);
+    if (result.success && result.packageName != null) {
+        // Pre-cache intent after installation
+        final String pkgName = result.packageName;
+        new Thread(() -> {
+            Intent intent = getBPackageManager().getLaunchIntentForPackage(pkgName, 0);
+            if (intent != null) {
+                sIntentCache.put(pkgName + "_0", intent);
+            }
+        }).start();
     }
+    return result;
+}
+
+public InstallResult installPackageAsUser(Uri apk, int userId) {
+    InstallResult result = getBPackageManager().installPackageAsUser(apk.toString(), InstallOption.installByStorage().makeUriFile(), userId);
+    if (result.success && result.packageName != null) {
+        final String pkgName = result.packageName;
+        new Thread(() -> {
+            Intent intent = getBPackageManager().getLaunchIntentForPackage(pkgName, 0);
+            if (intent != null) {
+                sIntentCache.put(pkgName + "_0", intent);
+            }
+        }).start();
+    }
+    return result;
+}
 
     public InstallResult installXPModule(File apk) {
         return getBPackageManager().installPackageAsUser(apk.getAbsolutePath(), InstallOption.installByStorage().makeXposed(), BUserHandle.USER_XPOSED);
