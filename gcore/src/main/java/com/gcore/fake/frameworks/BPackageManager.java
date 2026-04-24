@@ -252,3 +252,4 @@ public class BPackageManager extends BlackManager<IBPackageManagerService> {
         e.printStackTrace();
     }
 }
+
