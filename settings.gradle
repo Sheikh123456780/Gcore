@@ -1,4 +1,4 @@
-include ':gcore'
 
+include ':vbox-sdk'
 
-rootProject.name = "shayk"
+rootProject.name = "shayksdk"

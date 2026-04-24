@@ -1,0 +1,7 @@
+-keep class com.darkbox.** {*; }
+-keep class com.darkbox.jnihook.** {*; }
+-keep class black.** {*; }
+-keep class android.** {*; }
+-keep class com.android.** {*; }
+
+
