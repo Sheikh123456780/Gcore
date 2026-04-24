@@ -56,14 +56,6 @@ import com.darkbox.utils.compat.XposedParserCompat;
 
 import static android.content.pm.PackageManager.MATCH_DIRECT_BOOT_UNAWARE;
 
-/**
- * Created by @jagdish_vip on 4/1/21.
- * * ∧＿∧
- * (`･ω･∥
- * 丶　つ０
- * しーＪ
- * 此处无Bug
- */
 public class BPackageManagerService extends IBPackageManagerService.Stub implements ISystemService {
     public static final String TAG = "BPackageManagerService";
     public static BPackageManagerService sService = new BPackageManagerService();
@@ -78,20 +70,14 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
 
     final Object mInstallLock = new Object();
     
-    // ========== CACHE FOR FAST LOOKUP ==========
+    // Cache for fast lookup
     private final ConcurrentHashMap<String, PackageInfo> mPackageInfoCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ApplicationInfo> mAppInfoCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Boolean> mInstalledCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Intent> mLaunchIntentCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ResolveInfo> mResolveInfoCache = new ConcurrentHashMap<>();
-    private static final long CACHE_TTL = 60000; // 60 seconds TTL
+    private static final long CACHE_TTL = 60000;
     private final Handler mCacheHandler = new Handler(Looper.getMainLooper());
-    
-    // Cache hit counters for debugging
-    private int mPackageInfoCacheHits = 0;
-    private int mPackageInfoCacheMisses = 0;
-    private int mAppInfoCacheHits = 0;
-    private int mAppInfoCacheMisses = 0;
 
     public static BPackageManagerService get() {
         return sService;
@@ -103,8 +89,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         filter.addAction("android.intent.action.PACKAGE_ADDED");
         filter.addAction("android.intent.action.PACKAGE_REMOVED");
         filter.addDataScheme("package");
-        VBoxCore.getContext()
-                .registerReceiver(mPackageChangedHandler, filter);
+        VBoxCore.getContext().registerReceiver(mPackageChangedHandler, filter);
     }
 
     private final BroadcastReceiver mPackageChangedHandler = new BroadcastReceiver() {
@@ -113,7 +98,6 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
             String action = intent.getAction();
             if (!TextUtils.isEmpty(action)) {
                 if ("android.intent.action.PACKAGE_ADDED".equals(action) || "android.intent.action.PACKAGE_REMOVED".equals(action)) {
-                    // Clear cache on package changes
                     clearAllCaches();
                     mSettings.scanPackage();
                 }
@@ -121,61 +105,52 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         }
     };
     
-    // ========== CACHE MANAGEMENT METHODS ==========
-    
     private void clearAllCaches() {
         mPackageInfoCache.clear();
         mAppInfoCache.clear();
         mInstalledCache.clear();
         mLaunchIntentCache.clear();
         mResolveInfoCache.clear();
-        Slog.d(TAG, "All caches cleared");
     }
     
-    private void cachePackageInfo(String key, PackageInfo info) {
-        if (info != null) {
-            mPackageInfoCache.put(key, info);
-            scheduleCacheEviction(key, mPackageInfoCache);
+    private ResolveInfo chooseBestActivity(Intent intent, String resolvedType, int flags, List<ResolveInfo> query) {
+        if (query != null) {
+            final int N = query.size();
+            if (N == 1) {
+                return query.get(0);
+            } else if (N > 1) {
+                ResolveInfo r0 = query.get(0);
+                ResolveInfo r1 = query.get(1);
+                if (r0.priority != r1.priority || r0.preferredOrder != r1.preferredOrder || r0.isDefault != r1.isDefault) {
+                    return query.get(0);
+                }
+            }
         }
+        return null;
     }
     
-    private void cacheApplicationInfo(String key, ApplicationInfo info) {
-        if (info != null) {
-            mAppInfoCache.put(key, info);
-            scheduleCacheEviction(key, mAppInfoCache);
-        }
+    // Add missing resolveContentProvider method
+    @Override
+    public ProviderInfo resolveContentProvider(String authority, int flags, int userId) throws RemoteException {
+        if (!sUserManager.exists(userId)) return null;
+        return mComponentResolver.queryProvider(authority, flags, userId);
     }
     
-    private void cacheInstalled(String key, boolean value) {
-        mInstalledCache.put(key, value);
-        scheduleCacheEviction(key, mInstalledCache);
+    // Add missing querySyncSetting method if needed
+    @Override
+    public Bundle querySyncSetting(String authority, int userId) throws RemoteException {
+        Bundle result = new Bundle();
+        result.putBoolean("syncable", true);
+        return result;
     }
     
-    private void cacheLaunchIntent(String packageName, int userId, Intent intent) {
-        String key = packageName + "_" + userId;
-        if (intent != null) {
-            mLaunchIntentCache.put(key, intent);
-            scheduleCacheEviction(key, mLaunchIntentCache);
-        }
-    }
-    
-    private void scheduleCacheEviction(String key, ConcurrentHashMap<?, ?> cache) {
-        mCacheHandler.postDelayed(() -> {
-            cache.remove(key);
-            Slog.d(TAG, "Cache evicted: " + key);
-        }, CACHE_TTL);
-    }
-    
-    // Fast method to get launch intent with caching
     public Intent getLaunchIntentForPackage(String packageName, int userId) {
         String cacheKey = packageName + "_" + userId;
         Intent cached = mLaunchIntentCache.get(cacheKey);
         if (cached != null) {
-            Slog.d(TAG, "Launch intent cache HIT: " + packageName);
-            return new Intent(cached); // Return a copy
+            return new Intent(cached);
         }
         
-        Slog.d(TAG, "Launch intent cache MISS: " + packageName);
         PackageInfo pkgInfo = getPackageInfo(packageName, 0, userId);
         if (pkgInfo == null) {
             return null;
@@ -183,28 +158,21 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         
         Intent launchIntent = null;
         if (pkgInfo.activities != null && pkgInfo.activities.length > 0) {
-            ActivityInfo mainActivity = null;
             for (ActivityInfo activity : pkgInfo.activities) {
-                if (activity.launchMode != ActivityInfo.LAUNCH_SINGLE_INSTANCE) {
-                    if (mainActivity == null || 
-                        (Intent.ACTION_MAIN.equals(activity.name) && 
-                         activity.applicationInfo.packageName.equals(packageName))) {
-                        mainActivity = activity;
-                        if (Intent.ACTION_MAIN.equals(activity.name)) break;
-                    }
+                if (Intent.ACTION_MAIN.equals(activity.name)) {
+                    launchIntent = new Intent();
+                    launchIntent.setComponent(new ComponentName(packageName, activity.name));
+                    launchIntent.setAction(Intent.ACTION_MAIN);
+                    launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+                    launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    break;
                 }
-            }
-            if (mainActivity != null) {
-                launchIntent = new Intent();
-                launchIntent.setComponent(new ComponentName(packageName, mainActivity.name));
-                launchIntent.setAction(Intent.ACTION_MAIN);
-                launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
-                launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             }
         }
         
         if (launchIntent != null) {
-            cacheLaunchIntent(packageName, userId, launchIntent);
+            mLaunchIntentCache.put(cacheKey, launchIntent);
+            mCacheHandler.postDelayed(() -> mLaunchIntentCache.remove(cacheKey), CACHE_TTL);
         }
         return launchIntent;
     }
@@ -221,14 +189,11 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
             return null;
         }
         
-        // Check cache first
         String cacheKey = packageName + "_" + flags + "_" + userId;
         ApplicationInfo cached = mAppInfoCache.get(cacheKey);
         if (cached != null) {
-            mAppInfoCacheHits++;
             return cached;
         }
-        mAppInfoCacheMisses++;
         
         flags = updateFlags(flags, userId);
         synchronized (mPackages) {
@@ -236,141 +201,31 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
             if (ps != null) {
                 BPackage p = ps.pkg;
                 ApplicationInfo result = PackageManagerCompat.generateApplicationInfo(p, flags, ps.readUserState(userId), userId);
-                cacheApplicationInfo(cacheKey, result);
+                if (result != null) {
+                    mAppInfoCache.put(cacheKey, result);
+                    mCacheHandler.postDelayed(() -> mAppInfoCache.remove(cacheKey), CACHE_TTL);
+                }
                 return result;
             }
         }
         return null;
-    }
-    
-    // Fast method without flags for common queries
-    public ApplicationInfo getApplicationInfoFast(String packageName, int userId) {
-        return getApplicationInfo(packageName, 0, userId);
-    }
-
-    @Override
-    public PackageInfo getPackageInfo(String packageName, int flags, int userId) {
-        if (!sUserManager.exists(userId)) return null;
-        if (Objects.equals(packageName, VBoxCore.getHostPkg())) {
-            try {
-                return VBoxCore.getPackageManager().getPackageInfo(packageName, flags);
-            } catch (PackageManager.NameNotFoundException e) {
-                e.printStackTrace();
-            }
-            return null;
-        }
-
-        // Check cache first
-        String cacheKey = packageName + "_" + flags + "_" + userId;
-        PackageInfo cached = mPackageInfoCache.get(cacheKey);
-        if (cached != null) {
-            mPackageInfoCacheHits++;
-            return cached;
-        }
-        mPackageInfoCacheMisses++;
-
-        flags = updateFlags(flags, userId);
-        synchronized (mPackages) {
-            BPackageSettings ps = mPackages.get(packageName);
-            if (ps != null) {
-                PackageInfo result = PackageManagerCompat.generatePackageInfo(ps, flags, ps.readUserState(userId), userId);
-                cachePackageInfo(cacheKey, result);
-                return result;
-            }
-        }
-        return null;
-    }
-    
-    // Fast method without flags
-    public PackageInfo getPackageInfoFast(String packageName, int userId) {
-        return getPackageInfo(packageName, 0, userId);
-    }
-    
-    @Override
-    public boolean isInstalled(String packageName, int userId) {
-        if (!sUserManager.exists(userId)) return false;
-        
-        // Check cache
-        String cacheKey = packageName + "_" + userId;
-        Boolean cached = mInstalledCache.get(cacheKey);
-        if (cached != null) {
-            return cached;
-        }
-        
-        synchronized (mPackages) {
-            BPackageSettings ps = mPackages.get(packageName);
-            if (ps == null) {
-                cacheInstalled(cacheKey, false);
-                return false;
-            }
-            boolean result = ps.getInstalled(userId);
-            cacheInstalled(cacheKey, result);
-            return result;
-        }
-    }
-    
-    // Fast check with package name only (assumes user 0)
-    public boolean isInstalledFast(String packageName) {
-        return isInstalled(packageName, 0);
-    }
-    
-    @Override
-    public ResolveInfo resolveIntent(Intent intent, String resolvedType, int flags, int userId) {
-        if (!sUserManager.exists(userId)) return null;
-        
-        // Build cache key
-        String cacheKey = intent.getAction() + "_" + intent.getPackage() + "_" + resolvedType + "_" + flags + "_" + userId;
-        if (intent.getComponent() != null) {
-            cacheKey = intent.getComponent().toString() + "_" + flags + "_" + userId;
-        }
-        
-        ResolveInfo cached = mResolveInfoCache.get(cacheKey);
-        if (cached != null) {
-            return cached;
-        }
-        
-        List<ResolveInfo> resolves = queryIntentActivities(intent, resolvedType, flags, userId);
-        ResolveInfo result = chooseBestActivity(intent, resolvedType, flags, resolves);
-        
-        if (result != null) {
-            mResolveInfoCache.put(cacheKey, result);
-            scheduleCacheEviction(cacheKey, mResolveInfoCache);
-        }
-        return result;
-    }
-
-    @Override
-    public ResolveInfo resolveActivity(Intent intent, int flags, String resolvedType, int userId) {
-        return resolveIntent(intent, resolvedType, flags, userId);
     }
 
     @Override
     public ResolveInfo resolveService(Intent intent, int flags, String resolvedType, int userId) {
         if (!sUserManager.exists(userId)) return null;
-        
-        String cacheKey = "service_" + intent.getAction() + "_" + intent.getPackage() + "_" + userId;
-        ResolveInfo cached = mResolveInfoCache.get(cacheKey);
-        if (cached != null) {
-            return cached;
-        }
-        
         List<ResolveInfo> query = queryIntentServicesInternal(intent, resolvedType, flags, userId);
-        ResolveInfo result = (query != null && query.size() >= 1) ? query.get(0) : null;
-        
-        if (result != null) {
-            mResolveInfoCache.put(cacheKey, result);
-            scheduleCacheEviction(cacheKey, mResolveInfoCache);
+        if (query != null && query.size() >= 1) {
+            return query.get(0);
         }
-        return result;
+        return null;
     }
 
     private List<ResolveInfo> queryIntentServicesInternal(Intent intent, String resolvedType, int flags, int userId) {
         ComponentName comp = intent.getComponent();
-        if (comp == null) {
-            if (intent.getSelector() != null) {
-                intent = intent.getSelector();
-                comp = intent.getComponent();
-            }
+        if (comp == null && intent.getSelector() != null) {
+            intent = intent.getSelector();
+            comp = intent.getComponent();
         }
         if (comp != null) {
             final List<ResolveInfo> list = new ArrayList<>(1);
@@ -392,20 +247,31 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                     return mComponentResolver.queryServices(intent, resolvedType, flags, pkg.services, userId);
                 }
             } else {
-               return mComponentResolver.queryServices(intent, resolvedType, flags, userId);
+                return mComponentResolver.queryServices(intent, resolvedType, flags, userId);
             }
             return Collections.emptyList();
         }
     }
 
-    private List<ResolveInfo> queryIntentActivities(Intent intent,
-                                                    String resolvedType, int flags, int userId) {
+    @Override
+    public ResolveInfo resolveActivity(Intent intent, int flags, String resolvedType, int userId) {
+        if (!sUserManager.exists(userId)) return null;
+        List<ResolveInfo> resolves = queryIntentActivities(intent, resolvedType, flags, userId);
+        return chooseBestActivity(intent, resolvedType, flags, resolves);
+    }
+
+    @Override
+    public ResolveInfo resolveIntent(Intent intent, String resolvedType, int flags, int userId) {
+        if (!sUserManager.exists(userId)) return null;
+        List<ResolveInfo> resolves = queryIntentActivities(intent, resolvedType, flags, userId);
+        return chooseBestActivity(intent, resolvedType, flags, resolves);
+    }
+
+    private List<ResolveInfo> queryIntentActivities(Intent intent, String resolvedType, int flags, int userId) {
         ComponentName comp = intent.getComponent();
-        if (comp == null) {
-            if (intent.getSelector() != null) {
-                intent = intent.getSelector();
-                comp = intent.getComponent();
-            }
+        if (comp == null && intent.getSelector() != null) {
+            intent = intent.getSelector();
+            comp = intent.getComponent();
         }
 
         if (comp != null) {
@@ -438,6 +304,39 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                 BPackageSettings ps = mSettings.mPackages.get(component.getPackageName());
                 if (ps == null) return null;
                 return PackageManagerCompat.generateActivityInfo(a, flags, ps.readUserState(userId), userId);
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public PackageInfo getPackageInfo(String packageName, int flags, int userId) {
+        if (!sUserManager.exists(userId)) return null;
+        if (Objects.equals(packageName, VBoxCore.getHostPkg())) {
+            try {
+                return VBoxCore.getPackageManager().getPackageInfo(packageName, flags);
+            } catch (PackageManager.NameNotFoundException e) {
+                e.printStackTrace();
+            }
+            return null;
+        }
+
+        String cacheKey = packageName + "_" + flags + "_" + userId;
+        PackageInfo cached = mPackageInfoCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+
+        flags = updateFlags(flags, userId);
+        synchronized (mPackages) {
+            BPackageSettings ps = mPackages.get(packageName);
+            if (ps != null) {
+                PackageInfo result = PackageManagerCompat.generatePackageInfo(ps, flags, ps.readUserState(userId), userId);
+                if (result != null) {
+                    mPackageInfoCache.put(cacheKey, result);
+                    mCacheHandler.postDelayed(() -> mPackageInfoCache.remove(cacheKey), CACHE_TTL);
+                }
+                return result;
             }
         }
         return null;
@@ -506,7 +405,6 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
 
     @Override
     public List<PackageInfo> getInstalledPackages(int flags, int userId) {
-        final int callingUid = Binder.getCallingUid();
         if (!sUserManager.exists(userId)) return Collections.emptyList();
 
         synchronized (mPackages) {
@@ -525,8 +423,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         if (!sUserManager.exists(userId)) return Collections.emptyList();
         synchronized (mPackages) {
             ArrayList<ApplicationInfo> list = new ArrayList<>(mPackages.size());
-            Collection<BPackageSettings> packageSettings = mPackages.values();
-            for (BPackageSettings ps : packageSettings) {
+            for (BPackageSettings ps : mPackages.values()) {
                 ApplicationInfo ai = PackageManagerCompat.generateApplicationInfo(ps.pkg, flags, ps.readUserState(userId), userId);
                 if (ai != null) {
                     list.add(ai);
@@ -538,45 +435,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
 
     @Override
     public List<ResolveInfo> queryIntentActivities(Intent intent, int flags, String resolvedType, int userId) throws RemoteException {
-        if (!sUserManager.exists(userId)) return Collections.emptyList();
-        final String pkgName = intent.getPackage();
-        ComponentName comp = intent.getComponent();
-        if (comp == null) {
-            if (intent.getSelector() != null) {
-                intent = intent.getSelector();
-                comp = intent.getComponent();
-            }
-        }
-
-        if (comp != null) {
-            final List<ResolveInfo> list = new ArrayList<>(1);
-            final ActivityInfo ai = getActivityInfo(comp, flags, userId);
-            if (ai != null) {
-                final ResolveInfo ri = new ResolveInfo();
-                ri.activityInfo = ai;
-                list.add(ri);
-            }
-            return list;
-        }
-
-        List<ResolveInfo> result;
-        synchronized (mPackages) {
-            if (pkgName != null) {
-                BPackageSettings bPackageSettings = mPackages.get(pkgName);
-                result = null;
-                if (bPackageSettings != null) {
-                    final BPackage pkg = bPackageSettings.pkg;
-                    result = mComponentResolver.queryActivities(intent, resolvedType, flags, pkg.activities, userId);
-                }
-                if (result == null || result.size() == 0) {
-                    if (result == null) {
-                        result = new ArrayList<>();
-                    }
-                }
-                return result;
-            }
-        }
-        return Collections.emptyList();
+        return queryIntentActivities(intent, resolvedType, flags, userId);
     }
 
     @Override
@@ -584,11 +443,9 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         if (!sUserManager.exists(userId)) return Collections.emptyList();
 
         ComponentName comp = intent.getComponent();
-        if (comp == null) {
-            if (intent.getSelector() != null) {
-                intent = intent.getSelector();
-                comp = intent.getComponent();
-            }
+        if (comp == null && intent.getSelector() != null) {
+            intent = intent.getSelector();
+            comp = intent.getComponent();
         }
         if (comp != null) {
             final List<ResolveInfo> list = new ArrayList<>(1);
@@ -636,8 +493,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         synchronized (mInstallLock) {
             synchronized (mPackages) {
                 BPackageSettings ps = mPackages.get(packageName);
-                if (ps == null)
-                    return;
+                if (ps == null) return;
                 if (ps.installOption.isFlag(InstallOption.FLAG_XPOSED) && userId != BUserHandle.USER_XPOSED) {
                     return;
                 }
@@ -646,10 +502,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                 }
                 boolean removeApp = ps.getUserState().size() <= 1;
                 BProcessManagerService.get().killPackageAsUser(packageName, userId);
-                int i = BPackageInstallerService.get().uninstallPackageAsUser(ps, removeApp, userId);
-                if (i < 0) {
-                    // todo
-                }
+                BPackageInstallerService.get().uninstallPackageAsUser(ps, removeApp, userId);
 
                 if (removeApp) {
                     mSettings.removePackage(packageName);
@@ -658,7 +511,6 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
                     ps.removeUser(userId);
                     ps.save();
                 }
-                // Clear cache for this package
                 clearPackageCache(packageName, userId);
                 onPackageUninstalled(packageName, removeApp, userId);
             }
@@ -666,10 +518,10 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     }
     
     private void clearPackageCache(String packageName, int userId) {
-        mPackageInfoCache.remove(packageName + "_*");
-        mAppInfoCache.remove(packageName + "_*");
-        mInstalledCache.remove(packageName + "_" + userId);
-        mLaunchIntentCache.remove(packageName + "_" + userId);
+        mPackageInfoCache.clear();
+        mAppInfoCache.clear();
+        mInstalledCache.clear();
+        mLaunchIntentCache.clear();
         mResolveInfoCache.clear();
     }
 
@@ -678,23 +530,16 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         synchronized (mInstallLock) {
             synchronized (mPackages) {
                 BPackageSettings ps = mPackages.get(packageName);
-                if (ps == null)
-                    return;
+                if (ps == null) return;
                 BProcessManagerService.get().killAllByPackageName(packageName);
                 if (ps.installOption.isFlag(InstallOption.FLAG_XPOSED)) {
                     for (BUserInfo user : BUserManagerService.get().getAllUsers()) {
-                        int i = BPackageInstallerService.get().uninstallPackageAsUser(ps, true, user.id);
-                        if (i < 0) {
-                            continue;
-                        }
+                        BPackageInstallerService.get().uninstallPackageAsUser(ps, true, user.id);
                         onPackageUninstalled(packageName, true, user.id);
                     }
                 } else {
                     for (Integer userId : ps.getUserIds()) {
-                        int i = BPackageInstallerService.get().uninstallPackageAsUser(ps, true, userId);
-                        if (i < 0) {
-                            continue;
-                        }
+                        BPackageInstallerService.get().uninstallPackageAsUser(ps, true, userId);
                         onPackageUninstalled(packageName, true, userId);
                     }
                 }
@@ -712,9 +557,8 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         }
         BProcessManagerService.get().killPackageAsUser(packageName, userId);
         BPackageSettings ps = mPackages.get(packageName);
-        if (ps == null)
-            return;
-        int i = BPackageInstallerService.get().clearPackage(ps, userId);
+        if (ps == null) return;
+        BPackageInstallerService.get().clearPackage(ps, userId);
     }
 
     @Override
@@ -729,7 +573,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
         if (processes == null) return false;
 
         for (ActivityManager.RunningAppProcessInfo process : processes) {
-            if (Arrays.asList(process.pkgList).contains(packageName)) {
+            if (process.pkgList != null && Arrays.asList(process.pkgList).contains(packageName)) {
                 return true;
             }
         }
@@ -742,6 +586,28 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
             for (BPackageSettings ps : mPackages.values()) {
                 uninstallPackageAsUser(ps.pkg.packageName, userId);
             }
+        }
+    }
+
+    @Override
+    public boolean isInstalled(String packageName, int userId) {
+        if (!sUserManager.exists(userId)) return false;
+        
+        String cacheKey = packageName + "_" + userId;
+        Boolean cached = mInstalledCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        
+        synchronized (mPackages) {
+            BPackageSettings ps = mPackages.get(packageName);
+            if (ps == null) {
+                mInstalledCache.put(cacheKey, false);
+                return false;
+            }
+            boolean result = ps.getInstalled(userId);
+            mInstalledCache.put(cacheKey, result);
+            return result;
         }
     }
 
@@ -786,7 +652,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     public int checkUidPermission(String permission, int uid, String packageName) throws RemoteException {
         PermissionInfo info = getPermissionInfo(permission, 0);
         if (info != null) {
-            return 0;
+            return PackageManager.PERMISSION_GRANTED;
         }
         return VBoxCore.getPackageManager().checkPermission(permission, packageName);
     }
@@ -815,7 +681,6 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     }
 
     private InstallResult installPackageAsUserLocked(String file, InstallOption option, int userId) {
-        long l = System.currentTimeMillis();
         InstallResult result = new InstallResult();
         File apkFile = null;
         try {
@@ -839,18 +704,17 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
 
             PackageInfo packageArchiveInfo = VBoxCore.getPackageManager().getPackageArchiveInfo(apkFile.getAbsolutePath(), 0);
             if (packageArchiveInfo == null) {
-                return result.installError("getPackageArchiveInfo error.Please check whether APK is normal.");
+                return result.installError("getPackageArchiveInfo error");
             }
 
             boolean support = AbiUtils.isSupport(apkFile);
             if (!support) {
-                String msg = packageArchiveInfo.applicationInfo.loadLabel(VBoxCore.getPackageManager()) + "[" + packageArchiveInfo.packageName + "]";
-                return result.installError(packageArchiveInfo.packageName,
-                        msg + (VBoxCore.is64Bit() ? " not support armeabi-v7a abi" : "not support arm64-v8a abi"));
+                return result.installError(packageArchiveInfo.packageName, "ABI not supported");
             }
+            
             PackageParser.Package aPackage = parserApk(apkFile.getAbsolutePath());
             if (aPackage == null) {
-                return result.installError("parser apk error.");
+                return result.installError("parser apk error");
             }
             result.packageName = aPackage.packageName;
 
@@ -863,7 +727,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
 
             int i = BPackageInstallerService.get().installPackageAsUser(bPackageSettings, userId);
             if (i < 0) {
-                return result.installError("install apk error.");
+                return result.installError("install apk error");
             }
             synchronized (mPackages) {
                 bPackageSettings.setInstalled(true, userId);
@@ -873,22 +737,17 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
             mComponentResolver.addAllComponents(bPackageSettings.pkg);
             mSettings.scanPackage(aPackage.packageName);
             
-            // Pre-cache launch intent for this package
-            new Thread(() -> {
-                getLaunchIntentForPackage(aPackage.packageName, userId);
-            }).start();
-            
             onPackageInstalled(bPackageSettings.pkg.packageName, userId);
+            result.success = true;
             return result;
         } catch (Throwable t) {
             t.printStackTrace();
+            return result.installError(t.getMessage());
         } finally {
             if (apkFile != null && option.isFlag(InstallOption.FLAG_URI_FILE)) {
                 FileUtils.deleteDir(apkFile);
             }
-            Slog.d(TAG, "install finish: " + (System.currentTimeMillis() - l) + "ms");
         }
-        return result;
     }
 
     private PackageParser.Package parserApk(String file) {
@@ -911,10 +770,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     }
 
     private int updateFlags(int flags, int userId) {
-        if ((flags & (PackageManager.MATCH_DIRECT_BOOT_UNAWARE
-                | PackageManager.MATCH_DIRECT_BOOT_AWARE)) != 0) {
-            // Caller expressed an explicit opinion
-        } else {
+        if ((flags & (PackageManager.MATCH_DIRECT_BOOT_UNAWARE | PackageManager.MATCH_DIRECT_BOOT_AWARE)) == 0) {
             flags |= PackageManager.MATCH_DIRECT_BOOT_AWARE | MATCH_DIRECT_BOOT_UNAWARE;
         }
         return flags;
@@ -960,24 +816,6 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     public List<BPackageSettings> getBPackageSettings() {
         return new ArrayList<>(mPackages.values());
     }
-    
-    // Get cache stats for debugging
-    public String getCacheStats() {
-        return String.format("PackageInfo Cache: %d hits, %d misses (%.1f%% hit rate)\n" +
-                            "AppInfo Cache: %d hits, %d misses (%.1f%% hit rate)\n" +
-                            "Installed Cache: %d entries\n" +
-                            "LaunchIntent Cache: %d entries\n" +
-                            "ResolveInfo Cache: %d entries",
-                            mPackageInfoCacheHits, mPackageInfoCacheMisses,
-                            (mPackageInfoCacheHits + mPackageInfoCacheMisses) > 0 ? 
-                            (mPackageInfoCacheHits * 100.0 / (mPackageInfoCacheHits + mPackageInfoCacheMisses)) : 0,
-                            mAppInfoCacheHits, mAppInfoCacheMisses,
-                            (mAppInfoCacheHits + mAppInfoCacheMisses) > 0 ?
-                            (mAppInfoCacheHits * 100.0 / (mAppInfoCacheHits + mAppInfoCacheMisses)) : 0,
-                            mInstalledCache.size(),
-                            mLaunchIntentCache.size(),
-                            mResolveInfoCache.size());
-    }
 
     @Override
     public void systemReady() {
@@ -986,7 +824,6 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
             mComponentResolver.removeAllComponents(value.pkg);
             mComponentResolver.addAllComponents(value.pkg);
         }
-        Slog.d(TAG, "BPackageManagerService systemReady, cache stats:\n" + getCacheStats());
     }
 
     public String[] getDangerousPermissions(String packageName) {
