@@ -118,21 +118,21 @@ public class BProcessManagerService implements ISystemService {
                 bProcess = new HashMap<>();
             }
             if (bpid == -1) {
-                app = bProcess.get(processName);
-                if (app != null) {
-                    if (app.bActivityThread != null) {
-                        return app;
-                    }
-                }
-                // Get from pool first
-                bpid = sFreeProcessPool.poll();
-                if (bpid == null && sPoolInitialized) {
-                    bpid = getUsingBPidL();
-                } else if (bpid == null) {
-                    bpid = getUsingBPidL();
-                }
-                Slog.d(TAG, "init bUid = " + buid + ", bPid = " + bpid);
-            }
+    app = bProcess.get(processName);
+    if (app != null) {
+        if (app.bActivityThread != null) {
+            return app;
+        }
+    }
+    // Get from pool first
+    bpid = sFreeProcessPool.poll();
+    if (bpid == -1 && sPoolInitialized) {
+        bpid = getUsingBPidL();
+    } else if (bpid == -1) {
+        bpid = getUsingBPidL();
+    }
+    Slog.d(TAG, "init bUid = " + buid + ", bPid = " + bpid);
+}
             if (bpid == -1) {
                 throw new RuntimeException("No processes available");
             }
